@@ -21,10 +21,15 @@ import { registerTools, type ToolDeps } from "./tools.ts"
  * - `GET /health` answers `{"status":"ok"}` and nothing about the account.
  * - The MCP path (`/mcp`) serves MCP over Streamable HTTP, stateless: a
  *   fresh MCP server per request, nothing kept between them. With
- *   MCP_AUTH_TOKEN set, a request without `Authorization: Bearer <token>`
- *   is refused. Host and Origin must be loopback or in MCP_ALLOWED_HOSTS
- *   (DNS rebinding).
+ *   MCP_AUTH_TOKEN set (the service does not start without it unless
+ *   MCP_AUTH=off), a request without `Authorization: Bearer <token>` is
+ *   refused. Host and Origin must be well formed and loopback or in
+ *   MCP_ALLOWED_HOSTS (DNS rebinding). The request the MCP handler gets is
+ *   built on a fixed origin, never from the Host header.
  * - Everything else, `/` included, is 404 with no body worth reading.
+ * - A request target that is not a path ("http://…", "*", "//…"), or
+ *   anything else that throws while a request is read, is 400: nothing a
+ *   request carries ends the process.
  *
  * Requests are not logged: no address, no body, no header.
  */
@@ -35,16 +40,28 @@ const MAX_BODY_BYTES = 1024 * 1024
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 
-/** Whether a Host (or an Origin's host) value is one this server answers. */
+/** A Host value: a name or a bracketed IPv6 address, then an optional port. */
+const HOST = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?$/
+
+/** Whether a Host value reads as one: a name or [IPv6], a port of digits. */
+export function hostWellFormed(value: string | undefined): boolean {
+  return value !== undefined && HOST.test(value.toLowerCase())
+}
+
+/**
+ * Whether a Host (or an Origin's host) value is one this server answers: a
+ * well-formed host (a port, if any, all digits) that is loopback or in
+ * MCP_ALLOWED_HOSTS.
+ */
 export function hostAllowed(
   value: string | undefined,
   allowed: string[],
 ): boolean {
   if (!value) return false
   const host = value.toLowerCase()
-  const name = host.startsWith("[")
-    ? host.slice(0, host.indexOf("]") + 1)
-    : host.split(":")[0]!
+  const match = HOST.exec(host)
+  if (!match) return false
+  const name = match[1]!
   if (LOOPBACK.has(name)) return true
   return allowed.some(
     (entry) => entry === "*" || entry === host || entry === `${name}:*`,
@@ -66,7 +83,12 @@ function plain(res: ServerResponse, status: number, text: string) {
   res.end(text)
 }
 
-function toWebRequest(req: IncomingMessage, host: string): Request {
+/**
+ * The request as the MCP handler takes it, on a fixed origin: the Host
+ * header is checked against the allow-list but never parsed into a URL.
+ * `path` is the request target, already checked to start with "/".
+ */
+function toWebRequest(req: IncomingMessage, path: string): Request {
   const headers = new Headers()
   for (const [name, value] of Object.entries(req.headers)) {
     if (typeof value === "string") headers.set(name, value)
@@ -75,7 +97,7 @@ function toWebRequest(req: IncomingMessage, host: string): Request {
   }
   const method = req.method ?? "GET"
   const hasBody = method !== "GET" && method !== "HEAD"
-  return new Request(`http://${host}${req.url ?? "/"}`, {
+  return new Request(`http://localhost${path}`, {
     method,
     headers,
     body: hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined,
@@ -121,8 +143,15 @@ export function createMcpHttpServer(
     },
   )
 
-  return createServer((req, res) => {
-    const url = new URL(req.url ?? "/", "http://placeholder")
+  function handle(req: IncomingMessage, res: ServerResponse) {
+    // Origin-form targets only ("/mcp?…"): never an absolute URL, an
+    // authority or "*", which would otherwise be parsed below.
+    const target = req.url ?? ""
+    if (!target.startsWith("/") || target.startsWith("//")) {
+      plain(res, 400, "Bad request")
+      return
+    }
+    const url = new URL(target, "http://localhost")
     if (url.pathname === "/health") {
       if (req.method !== "GET" && req.method !== "HEAD") {
         plain(res, 405, "Method not allowed")
@@ -140,6 +169,10 @@ export function createMcpHttpServer(
       return
     }
     const host = req.headers.host
+    if (!hostWellFormed(host)) {
+      plain(res, 400, "Bad request")
+      return
+    }
     if (!hostAllowed(host, config.allowedHosts)) {
       plain(res, 403, "Host not allowed")
       return
@@ -169,12 +202,24 @@ export function createMcpHttpServer(
       return
     }
     handler
-      .fetch(toWebRequest(req, host!))
+      .fetch(toWebRequest(req, target))
       .then((response) => sendWebResponse(res, response))
       .catch(() => {
         logger.error("mcp_handler_failed")
         if (!res.headersSent) plain(res, 500, "Internal error")
         else res.destroy()
       })
+  }
+
+  return createServer((req, res) => {
+    // Nothing a request carries may end the process: whatever throws
+    // while it is read is a 400.
+    try {
+      handle(req, res)
+    } catch {
+      logger.warn("http_bad_request")
+      if (!res.headersSent) plain(res, 400, "Bad request")
+      else res.destroy()
+    }
   })
 }

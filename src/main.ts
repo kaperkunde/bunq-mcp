@@ -41,8 +41,7 @@ const client = new BunqClient({
 
 if (!config.authToken) {
   logger.warn("mcp_auth_off", {
-    message:
-      "MCP_AUTH_TOKEN is not set: anything that reaches the port can use the tools.",
+    message: "MCP_AUTH=off: anything that reaches the port can use the tools.",
   })
 }
 

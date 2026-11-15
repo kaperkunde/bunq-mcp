@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import { BunqError } from "../src/bunq.ts"
-import { API_KEY, USER_ID } from "./fake-bunq.ts"
+import { API_KEY, API_KEY_USER_ID, USER_ID } from "./fake-bunq.ts"
 import { DAY_MS, setup } from "./helpers.ts"
 
 const INSTALL = ["POST", "/v1/installation"] as const
@@ -32,6 +32,20 @@ describe("bootstrap", () => {
     expect(
       fake.requests[0]!.headers["X-Bunq-Client-Authentication"],
     ).toBeUndefined()
+  })
+
+  it("takes a UserApiKey session's own id for paths, and the granting user's timeout", async () => {
+    const s = setup()
+    s.fake.sessionAs = "UserApiKey"
+    s.fake.sessionTimeout = 3600
+    expect(await s.client.userId()).toBe(API_KEY_USER_ID)
+    const session = await s.client.session()
+    expect(session.timeoutSeconds).toBe(3600)
+    // The fake serves that user's paths only: a read works.
+    const listing = await s.client.list(
+      `/user/${API_KEY_USER_ID}/monetary-account`,
+    )
+    expect(listing.items).toHaveLength(4)
   })
 
   it("keeps the key and the context in the data folder, readable by its owner only", async () => {

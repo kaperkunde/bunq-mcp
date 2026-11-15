@@ -26,7 +26,7 @@ describe("the PCP service definition", () => {
   })
 
   it("matches the default port, the MCP path and the health path", () => {
-    const defaults = loadConfig({ BUNQ_API_KEY: API_KEY })
+    const defaults = loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH: "off" })
     expect(yaml).toContain(`- container: ${defaults.port}`)
     expect(yaml).toMatch(
       new RegExp(
@@ -42,7 +42,9 @@ describe("the PCP service definition", () => {
 
   it("keeps its data in the volume the service writes to", () => {
     expect(yaml).toMatch(/volumes:\n {2}- name: data\n {4}path: \/data\n/)
-    expect(loadConfig({ BUNQ_API_KEY: API_KEY }).dataDir).toBe("/data")
+    expect(loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH: "off" }).dataDir).toBe(
+      "/data",
+    )
   })
 
   it("has PCP send the MCP token the service checks", () => {

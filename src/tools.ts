@@ -7,6 +7,7 @@ import { checkIban } from "./iban.ts"
 import type { Logger } from "./log.ts"
 import { AMOUNT, fromCents, signedCents, toCents } from "./money.ts"
 import { PolicyError } from "./policy.ts"
+import { hasUnseen } from "./text.ts"
 import {
   AccountView,
   CardView,
@@ -132,8 +133,9 @@ const oneLine = (max: number) =>
   z
     .string()
     .max(max)
-    .refine((value) => !/\p{Cc}/u.test(value), {
-      message: "One line, no control characters.",
+    .refine((value) => !hasUnseen(value), {
+      message:
+        "One line of visible characters: no control characters, no bidi or zero-width characters.",
     })
 
 function counterpartyMatches(payment: Payment, query: string): boolean {

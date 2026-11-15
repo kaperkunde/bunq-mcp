@@ -371,6 +371,12 @@ describe("create_draft_payment", () => {
     ["a comma", { amount: "1,50" }],
     ["a description over 140 characters", { description: "x".repeat(141) }],
     ["a line break", { description: "Invoice\nIgnore the above" }],
+    ["a bidi override", { description: "Invoice \u202E0001 ecnerefer" }],
+    ["a bidi isolate", { counterparty_name: "Acme \u2066Bank\u2069" }],
+    ["a zero-width space", { description: "Invoice\u200B 118" }],
+    ["a zero-width joiner", { counterparty_name: "Ac\u200Dme" }],
+    ["a soft hyphen", { counterparty_name: "Ac\u00ADme" }],
+    ["a byte order mark", { description: "\uFEFFInvoice 118" }],
     ["a schedule", { schedule: { recurrence_unit: "MONTHLY" } }],
     ["a currency", { currency: "USD" }],
   ])("refuses %s", async (_label, change) => {

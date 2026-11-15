@@ -1,4 +1,5 @@
-import type { AddressInfo } from "node:net"
+import { request } from "node:http"
+import { connect, type AddressInfo } from "node:net"
 
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -111,5 +112,78 @@ describe("the HTTP side", () => {
     expect(hostAllowed("192.0.2.10:8080", ["192.0.2.10:8080"])).toBe(true)
     expect(hostAllowed("192.0.2.10:9999", ["192.0.2.10:8080"])).toBe(false)
     expect(hostAllowed("192.0.2.10:9999", ["192.0.2.10:*"])).toBe(true)
+    expect(hostAllowed("localhost:abc", [])).toBe(false)
+    expect(hostAllowed("localhost:", [])).toBe(false)
+    expect(hostAllowed("local host", ["*"])).toBe(false)
+    expect(hostAllowed("evil.example:80/x", ["*"])).toBe(false)
+  })
+
+  it("answers 400 to a request target it cannot parse, and keeps serving", async () => {
+    const { base } = await serve("a-long-enough-token-123")
+    const port = Number(new URL(base).port)
+    for (const line of [
+      "GET http://[ HTTP/1.1",
+      "GET * HTTP/1.1",
+      "GET //evil.example/mcp HTTP/1.1",
+      "POST http://localhost/mcp HTTP/1.1",
+    ]) {
+      const status = await new Promise<string>((resolve, reject) => {
+        const socket = connect(port, "127.0.0.1", () =>
+          socket.write(
+            `${line}\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n`,
+          ),
+        )
+        socket.once("data", (data) => {
+          resolve(data.toString().split("\r\n")[0]!)
+          socket.destroy()
+        })
+        socket.on("error", reject)
+      })
+      expect(status, line).toBe("HTTP/1.1 400 Bad Request")
+    }
+    expect((await fetch(`${base}/health`)).status).toBe(200)
+  })
+
+  it("refuses a malformed Host after the token, and keeps serving", async () => {
+    const { base, fake } = await serve("a-long-enough-token-123")
+    const port = Number(new URL(base).port)
+    for (const host of ["localhost:abc", "localhost:", "local host", "[::1"]) {
+      expect(await postWithHost(port, host), host).toBe(400)
+    }
+    expect((await fetch(`${base}/health`)).status).toBe(200)
+    expect(fake.requests).toHaveLength(0)
+  })
+
+  it("never builds the MCP request from the Host header", async () => {
+    const { base } = await serve("a-long-enough-token-123")
+    // An allowed Host on any port reaches the handler on a fixed origin.
+    const port = Number(new URL(base).port)
+    expect(await postWithHost(port, "localhost:65535")).toBe(200)
+    expect(await postWithHost(port, "[::1]")).toBe(200)
+    expect(await postWithHost(port, "evil.example:8080")).toBe(403)
   })
 })
+
+function postWithHost(port: number, host: string): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const req = request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/mcp",
+        method: "POST",
+        headers: {
+          ...mcpHeaders,
+          Host: host,
+          Authorization: "Bearer a-long-enough-token-123",
+        },
+      },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode ?? 0)
+      },
+    )
+    req.on("error", reject)
+    req.end(initialize)
+  })
+}

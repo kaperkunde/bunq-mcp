@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest"
 import { ConfigError, loadConfig } from "../src/config.ts"
 import { API_KEY } from "./fake-bunq.ts"
 
+const TOKEN = "mcp-token-0123456789abcdef"
+
 describe("loadConfig", () => {
   it("reads the defaults", () => {
-    const config = loadConfig({ BUNQ_API_KEY: API_KEY })
+    const config = loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH_TOKEN: TOKEN })
     expect(config).toMatchObject({
       environment: "production",
       dataDir: "/data",
@@ -16,7 +18,7 @@ describe("loadConfig", () => {
       allowedHosts: [],
     })
     expect(config.draftMaxCents).toBeUndefined()
-    expect(config.authToken).toBeUndefined()
+    expect(config.authToken).toBe(TOKEN)
   })
 
   it("needs the API key", () => {
@@ -35,28 +37,42 @@ describe("loadConfig", () => {
 
   it("reads the draft cap in cents", () => {
     expect(
-      loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_DRAFT_MAX_AMOUNT: "250" })
-        .draftMaxCents,
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
+        BUNQ_DRAFT_MAX_AMOUNT: "250",
+      }).draftMaxCents,
     ).toBe(25000)
     expect(
-      loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_DRAFT_MAX_AMOUNT: "99.5" })
-        .draftMaxCents,
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
+        BUNQ_DRAFT_MAX_AMOUNT: "99.5",
+      }).draftMaxCents,
     ).toBe(9950)
     for (const bad of ["0", "-5", "1,50", "abc", "1.234"]) {
       expect(() =>
-        loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_DRAFT_MAX_AMOUNT: bad }),
+        loadConfig({
+          BUNQ_API_KEY: API_KEY,
+          MCP_AUTH_TOKEN: TOKEN,
+          BUNQ_DRAFT_MAX_AMOUNT: bad,
+        }),
       ).toThrow(ConfigError)
     }
   })
 
   it("takes the sandbox only by name", () => {
     expect(
-      loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_ENVIRONMENT: "sandbox" })
-        .environment,
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
+        BUNQ_ENVIRONMENT: "sandbox",
+      }).environment,
     ).toBe("sandbox")
     expect(() =>
       loadConfig({
         BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
         BUNQ_ENVIRONMENT: "https://evil.example",
       }),
     ).toThrow(ConfigError)
@@ -64,11 +80,18 @@ describe("loadConfig", () => {
 
   it("takes IPv4 addresses or * for the device", () => {
     expect(
-      loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_PERMITTED_IPS: "192.0.2.1, *" })
-        .permittedIps,
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
+        BUNQ_PERMITTED_IPS: "192.0.2.1, *",
+      }).permittedIps,
     ).toEqual(["192.0.2.1", "*"])
     expect(() =>
-      loadConfig({ BUNQ_API_KEY: API_KEY, BUNQ_PERMITTED_IPS: "example.com" }),
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH_TOKEN: TOKEN,
+        BUNQ_PERMITTED_IPS: "example.com",
+      }),
     ).toThrow(ConfigError)
   })
 
@@ -76,5 +99,25 @@ describe("loadConfig", () => {
     expect(() =>
       loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH_TOKEN: "short" }),
     ).toThrow(ConfigError)
+  })
+
+  it("will not start without an MCP token unless told MCP_AUTH=off", () => {
+    expect(() => loadConfig({ BUNQ_API_KEY: API_KEY })).toThrow(
+      /MCP_AUTH_TOKEN is not set/,
+    )
+    const open = loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH: "off" })
+    expect(open.authToken).toBeUndefined()
+    for (const value of ["0", "false", "no", "OFF", "disabled"]) {
+      expect(() =>
+        loadConfig({ BUNQ_API_KEY: API_KEY, MCP_AUTH: value }),
+      ).toThrow(ConfigError)
+    }
+    expect(() =>
+      loadConfig({
+        BUNQ_API_KEY: API_KEY,
+        MCP_AUTH: "off",
+        MCP_AUTH_TOKEN: TOKEN,
+      }),
+    ).toThrow(/choose one/)
   })
 })

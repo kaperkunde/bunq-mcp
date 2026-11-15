@@ -135,6 +135,49 @@ describe("the request allow-list", () => {
     ],
     ["an attachment", draft({}, { attachment: [{ id: 1 }] })],
     ["a long description", draft({}, { description: "x".repeat(141) })],
+    ["an empty description", draft({}, { description: "" })],
+    ["a line break", draft({}, { description: "Invoice\nPay more" })],
+    ["a bidi override", draft({}, { description: "Invoice \u202E8110" })],
+    ["a zero-width space", draft({}, { description: "Invoice\u200B118" })],
+    [
+      "a bidi isolate in the name",
+      draft(
+        {},
+        {
+          counterparty_alias: {
+            type: "IBAN",
+            value: OTHER_IBAN,
+            name: "Acme \u2067Bank",
+          },
+        },
+      ),
+    ],
+    [
+      "a zero-width joiner in the name",
+      draft(
+        {},
+        {
+          counterparty_alias: {
+            type: "IBAN",
+            value: OTHER_IBAN,
+            name: "Ac\u200Dme",
+          },
+        },
+      ),
+    ],
+    [
+      "a name over 70 characters",
+      draft(
+        {},
+        {
+          counterparty_alias: {
+            type: "IBAN",
+            value: OTHER_IBAN,
+            name: "x".repeat(71),
+          },
+        },
+      ),
+    ],
     ["no JSON", "not json"],
   ])("refuses a draft with %s", (_label, body) => {
     expect(() => assertAllowed(req("POST", DRAFT_PATH, body))).toThrow(

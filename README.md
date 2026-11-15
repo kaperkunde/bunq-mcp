@@ -47,14 +47,19 @@ payment in the conversation.
 ### Draft payments
 
 `create_draft_payment` takes `account_id`, `amount` (EUR, `184.80`),
-`iban`, `counterparty_name` and `description` (at most 140 characters), and
-refuses, before anything is sent:
+`iban`, `counterparty_name` (at most 70 characters) and `description` (at
+most 140), and refuses, before anything is sent:
 
 - an amount that is not positive, has more than two decimals, or is above
   `BUNQ_DRAFT_MAX_AMOUNT` when that is set;
 - an IBAN from a country without IBANs, of the wrong length for its
   country, or whose check digits are wrong (ISO 13616 mod 97);
-- a source account that is not one of yours, not active, or not in EUR.
+- a source account that is not one of yours, not active, or not in EUR;
+- a name or description that is empty, longer than allowed, or holds a
+  character that does not show: control characters (line breaks, tabs)
+  and format characters (bidi overrides and isolates, zero-width spaces
+  and joiners, soft hyphens), which could make the app show something
+  else than was sent.
 
 It sends one draft with exactly one payment, status PENDING, one accept,
 no schedule and no attachment, signed, with an idempotency key (so a draft
@@ -76,16 +81,17 @@ PATCH or DELETE. There is no code that builds one.
 
 ## Environment
 
-| Variable                           |                                            | What it is                                                                                                                                                                                                                                                                   |
-| ---------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BUNQ_API_KEY`                     | **secret, required**                       | Your bunq API key: in the bunq app, Profile → Security & Settings → Developers → API keys → Add API key. One service per bunq user: a personal key and a business key are two services.                                                                                      |
-| `MCP_AUTH_TOKEN`                   | **secret**, required by the PCP definition | When set, every MCP request must send `Authorization: Bearer <token>`. PCP sends it for you (`registers.auth`). Use a long random value; at least 16 characters.                                                                                                             |
-| `BUNQ_DRAFT_MAX_AMOUNT`            | plain, optional                            | The largest draft, in EUR (`500`, `250.00`). Empty: no cap.                                                                                                                                                                                                                  |
-| `BUNQ_PERMITTED_IPS`               | plain, optional                            | `permitted_ips` for the device registration. Empty: bunq ties the key to the address it is first used from. For a key that allows all addresses (a home connection whose address changes), your current address and `*`: `192.0.2.1,*`. A change registers the device again. |
-| `BUNQ_ENVIRONMENT`                 | plain, optional                            | `production` (default) or `sandbox` (bunq's sandbox, with a sandbox key).                                                                                                                                                                                                    |
-| `MCP_ALLOWED_HOSTS`                | plain, optional                            | `Host` values accepted besides loopback, comma separated (`192.0.2.10:8080`, `host:*`, `*`): the address you publish on, if it is not 127.0.0.1.                                                                                                                             |
-| `MCP_PORT`, `MCP_HOST`, `MCP_PATH` |                                            | Where it listens: `8080`, `0.0.0.0` (inside the container), `/mcp`.                                                                                                                                                                                                          |
-| `BUNQ_DATA_DIR`                    |                                            | Its data folder: `/data`, a named volume.                                                                                                                                                                                                                                    |
+| Variable                           |                      | What it is                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BUNQ_API_KEY`                     | **secret, required** | Your bunq API key: in the bunq app, Profile → Security & Settings → Developers → API keys → Add API key. One service per bunq user: a personal key and a business key are two services.                                                                                      |
+| `MCP_AUTH_TOKEN`                   | **secret, required** | Every MCP request must send `Authorization: Bearer <token>`. PCP sends it for you (`registers.auth`). A long random value, at least 16 characters. Without it the service does not start, unless `MCP_AUTH=off`.                                                             |
+| `MCP_AUTH`                         | plain, optional      | `off` serves the tools with no token, to anything that reaches the port; only for a test on a machine of your own. Unset otherwise. Setting both is refused.                                                                                                                 |
+| `BUNQ_DRAFT_MAX_AMOUNT`            | plain, optional      | The largest draft, in EUR (`500`, `250.00`). Empty: no cap.                                                                                                                                                                                                                  |
+| `BUNQ_PERMITTED_IPS`               | plain, optional      | `permitted_ips` for the device registration. Empty: bunq ties the key to the address it is first used from. For a key that allows all addresses (a home connection whose address changes), your current address and `*`: `192.0.2.1,*`. A change registers the device again. |
+| `BUNQ_ENVIRONMENT`                 | plain, optional      | `production` (default) or `sandbox` (bunq's sandbox, with a sandbox key).                                                                                                                                                                                                    |
+| `MCP_ALLOWED_HOSTS`                | plain, optional      | `Host` values accepted besides loopback, comma separated (`192.0.2.10:8080`, `host:*`, `*`): the address you publish on, if it is not 127.0.0.1.                                                                                                                             |
+| `MCP_PORT`, `MCP_HOST`, `MCP_PATH` |                      | Where it listens: `8080`, `0.0.0.0` (inside the container), `/mcp`.                                                                                                                                                                                                          |
+| `BUNQ_DATA_DIR`                    |                      | Its data folder: `/data`, a named volume.                                                                                                                                                                                                                                    |
 
 A bad value stops the service at start with a line that names the
 variable, never its value.
@@ -96,15 +102,27 @@ variable, never its value.
 `BUNQ_ENVIRONMENT=sandbox`), on port 443. No telemetry, no update check, no
 other host, no DNS but the name lookup for that host.
 
-That is enforced by the code, not by PCP (a PCP service has no network
+That is the code's doing, not PCP's (a PCP service has no network
 setting): `src/egress.ts` is the only module that opens a connection. It
 fixes the host when the transport is made; a request carries only a path,
 checked against `/v1/…`, never a URL; redirects are not followed; no proxy
-variable is read (its own `https.Agent`); answers are capped at 8 MiB.
-ESLint forbids `node:https`, `node:net`, `node:tls`, `node:http` (outside
-the server module) and `fetch` everywhere else, and `test/egress.test.ts`
-checks the sources for the same. Neither runtime dependency is used to
-make a request: the MCP SDK only serves, zod only checks.
+variable is read (its own `https.Agent`); bunq's certificate is checked
+(`rejectUnauthorized: true`, said outright); a body goes out in one piece
+with its `Content-Length`; answers are capped at 8 MiB. Neither runtime
+dependency is used to make a request: the MCP SDK only serves, zod only
+checks.
+
+The rule that no other module reaches the network is **a code convention
+checked by lint and a test, not a sandbox**. ESLint refuses, outside
+`src/egress.ts` (and `node:http` outside the server module): imports of
+`node:https`, `node:http`, `node:http2`, `node:net`, `node:tls`,
+`node:dns`, `node:dgram`, `node:child_process`, `node:worker_threads`,
+`node:cluster`, `node:inspector` and `undici`, the same as dynamic
+`import()`, any computed `import()`, `require`, `createRequire`, `fetch`
+and `globalThis.fetch`, `WebSocket`, `process.binding`; and
+`test/egress.test.ts` scans the sources for the same. A determined change
+could still get past both; the network check on your server below is what
+shows what the running image does.
 
 To check it on your server, watch the container's connections for a while
 (for example `conntrack -L | grep <container IP>` or `tcpdump -n -i
@@ -215,8 +233,13 @@ docker run -d --name bunq-mcp -p 127.0.0.1:8080:8080 \
   ghcr.io/kaperkunde/bunq-mcp@sha256:<digest>
 ```
 
+`BUNQ_API_KEY` and `MCP_AUTH_TOKEN` come from your shell's environment
+(`MCP_AUTH_TOKEN=$(openssl rand -hex 32)`, say); without the token it
+refuses to start. Your MCP client sends it as `Authorization: Bearer …`.
+
 `GET /health` answers `{"status":"ok"}`; `GET /` and every other path but
-`/mcp` answer 404.
+`/mcp` answer 404; a request target or `Host` it cannot read answers 400 or
+403, and the server carries on.
 
 ## The image
 

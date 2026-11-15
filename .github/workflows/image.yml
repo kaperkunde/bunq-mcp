@@ -45,6 +45,9 @@ jobs:
   image:
     name: build, push, sign, attest
     needs: checks
+    # Only main and version tags publish: a dispatch from another branch
+    # runs the checks and pushes nothing.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # id-token: the OIDC token cosign and the attestation are signed with.

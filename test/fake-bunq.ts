@@ -17,6 +17,8 @@ import type {
 export const API_KEY =
   "sandbox_0123456789abcdef0123456789abcdef0123456789abcdef"
 export const USER_ID = 4242
+/** The UserApiKey's own id, which paths take in a UserApiKey session. */
+export const API_KEY_USER_ID = 7777
 
 export const OWN_IBAN = "NL91ABNA0417164300"
 export const OTHER_IBAN = "DE89370400440532013000"
@@ -90,6 +92,8 @@ export class FakeBunq {
   sessionTimeout = 7 * 24 * 60 * 60
   /** Answers 401 to session-server when set (a device removed in the app). */
   refuseSessions = false
+  /** What a session answers with: a person, or a UserApiKey (OAuth or a granted key). */
+  sessionAs: "UserPerson" | "UserApiKey" = "UserPerson"
   payments = defaultPayments()
 
   #clientKey: string | undefined
@@ -183,24 +187,33 @@ export class FakeBunq {
         return error(400, "User credentials are incorrect.")
       const session = token()
       this.#sessions.add(session)
+      const person = {
+        id: USER_ID,
+        display_name: "Kevin Example",
+        session_timeout: this.sessionTimeout,
+        date_of_birth: "1980-01-01",
+        document_number: "X1234567",
+      }
       return ok([
         { Id: { id: 77 } },
         { Token: { id: 77, token: session } },
-        {
-          UserPerson: {
-            id: USER_ID,
-            display_name: "Kevin Example",
-            session_timeout: this.sessionTimeout,
-            date_of_birth: "1980-01-01",
-            document_number: "X1234567",
-          },
-        },
+        this.sessionAs === "UserApiKey"
+          ? {
+              UserApiKey: {
+                id: API_KEY_USER_ID,
+                requested_by_user: {
+                  UserPerson: { id: 1, display_name: "An app" },
+                },
+                granted_by_user: { UserPerson: person },
+              },
+            }
+          : { UserPerson: person },
       ])
     }
 
     if (!auth || !this.#sessions.has(auth))
       return error(401, "Insufficient authorisation.")
-    const user = `/v1/user/${USER_ID}`
+    const user = `/v1/user/${this.sessionAs === "UserApiKey" ? API_KEY_USER_ID : USER_ID}`
 
     if (request.method === "GET" && path === "/v1/user") {
       return ok([

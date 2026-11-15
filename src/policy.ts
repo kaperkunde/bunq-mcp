@@ -1,5 +1,6 @@
 import { checkIban } from "./iban.ts"
 import { AMOUNT, toCents } from "./money.ts"
+import { plainLine } from "./text.ts"
 import type { OutgoingRequest, Transport } from "./egress.ts"
 
 /**
@@ -112,14 +113,18 @@ export function checkDraftBody(body: string | undefined, maxCents?: number) {
     !onlyKeys(alias, ["type", "value", "name"]) ||
     alias.type !== "IBAN" ||
     typeof alias.value !== "string" ||
-    !checkIban(alias.value).ok ||
-    typeof alias.name !== "string"
+    !checkIban(alias.value).ok
   ) {
     throw new PolicyError("A draft payment goes to a valid IBAN only.")
   }
-  if (typeof entry.description !== "string" || entry.description.length > 140) {
+  if (!plainLine(alias.name, 70)) {
     throw new PolicyError(
-      "A draft payment's description is at most 140 characters.",
+      "A draft payment's recipient name is one line of at most 70 visible characters.",
+    )
+  }
+  if (!plainLine(entry.description, 140)) {
+    throw new PolicyError(
+      "A draft payment's description is one line of at most 140 visible characters.",
     )
   }
 }

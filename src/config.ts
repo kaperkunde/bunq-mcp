@@ -90,6 +90,22 @@ export function loadConfig(env: Env = process.env): Config {
   if (authToken !== undefined && authToken.length < 16) {
     throw new ConfigError("MCP_AUTH_TOKEN is at least 16 characters.")
   }
+  // Fail closed: without a token the tools answer whoever reaches the
+  // port, so that takes an explicit MCP_AUTH=off.
+  const auth = trimmed(env, "MCP_AUTH")
+  if (auth !== undefined && auth !== "off") {
+    throw new ConfigError("MCP_AUTH is off, or left unset.")
+  }
+  if (authToken === undefined && auth !== "off") {
+    throw new ConfigError(
+      "MCP_AUTH_TOKEN is not set: set it to a long random secret (PCP sends it for you), or set MCP_AUTH=off to serve the tools without one.",
+    )
+  }
+  if (authToken !== undefined && auth === "off") {
+    throw new ConfigError(
+      "MCP_AUTH=off and MCP_AUTH_TOKEN are both set: choose one.",
+    )
+  }
 
   const allowedHosts = (trimmed(env, "MCP_ALLOWED_HOSTS") ?? "")
     .split(",")

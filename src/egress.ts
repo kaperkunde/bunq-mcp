@@ -50,13 +50,31 @@ export function safePath(path: string): boolean {
   return SAFE_PATH.test(path) && !path.includes("//") && !path.includes("..")
 }
 
+/**
+ * The headers sent: a request with a body says its length in bytes, so it
+ * goes out in one piece (never chunked) exactly as it was signed.
+ */
+export function wireHeaders(outgoing: OutgoingRequest): Record<string, string> {
+  if (outgoing.body === undefined) return outgoing.headers
+  return {
+    ...outgoing.headers,
+    "Content-Length": String(Buffer.byteLength(outgoing.body, "utf8")),
+  }
+}
+
 /** The transport to bunq's API for one environment. */
 export function httpsTransport(environment: Environment): Transport {
   const host = BUNQ_HOSTS[environment]
   if (!host) throw new EgressError(`Unknown bunq environment: ${environment}`)
   // Our own agent: no global agent another module could have changed, and
   // node:https never reads HTTP(S)_PROXY.
-  const agent = new Agent({ keepAlive: true, maxSockets: 4 })
+  // Certificates are checked against the system's roots, said outright so
+  // no default or environment variable can turn it off.
+  const agent = new Agent({
+    keepAlive: true,
+    maxSockets: 4,
+    rejectUnauthorized: true,
+  })
 
   return (outgoing) =>
     new Promise<IncomingResponse>((resolve, reject) => {
@@ -73,8 +91,9 @@ export function httpsTransport(environment: Environment): Transport {
           port: 443,
           method: outgoing.method,
           path: outgoing.path,
-          headers: outgoing.headers,
+          headers: wireHeaders(outgoing),
           agent,
+          rejectUnauthorized: true,
           timeout: REQUEST_TIMEOUT_MS,
         },
         (res) => {
@@ -107,7 +126,8 @@ export function httpsTransport(environment: Environment): Transport {
         req.destroy(new EgressError("bunq did not answer in time.")),
       )
       req.on("error", reject)
-      if (outgoing.body !== undefined) req.write(outgoing.body)
-      req.end()
+      // One write with its length: a signed body goes out exactly as
+      // signed, never chunked.
+      req.end(outgoing.body)
     })
 }

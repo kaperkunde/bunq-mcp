@@ -151,26 +151,38 @@ function olderId(body: string): number | undefined {
   }
 }
 
-/** The user a session belongs to: a person, a company, or an OAuth grant. */
+/**
+ * The user a session belongs to, and how long bunq keeps its sessions. For
+ * a person's or a company's key that is the UserPerson or UserCompany. For
+ * a UserApiKey session (an OAuth grant, or a key another user made for
+ * you) the id paths take is the UserApiKey's own id, as bunq's API and its
+ * SDKs use it; the user who granted it only gives the session timeout.
+ */
 function sessionUser(items: unknown[]): { id: number; timeout: number } {
+  let id: unknown
+  let timeoutOf: BunqItem | undefined
   const person = find(items, "UserPerson") ?? find(items, "UserCompany")
-  let user = person
-  if (!user) {
+  if (person) {
+    id = person.id
+    timeoutOf = person
+  } else {
     const apiKey = find(items, "UserApiKey")
+    id = apiKey?.id
     const granted =
       apiKey && isRecord(apiKey.granted_by_user)
         ? apiKey.granted_by_user
         : undefined
-    user = granted ? (unwrap(granted)?.value ?? undefined) : undefined
+    timeoutOf = granted ? unwrap(granted)?.value : undefined
   }
-  if (!user || typeof user.id !== "number") {
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
     throw new BunqError(0, undefined, "bunq's session named no user.")
   }
+  const sessionTimeout = timeoutOf?.session_timeout
   const timeout =
-    typeof user.session_timeout === "number" && user.session_timeout > 0
-      ? user.session_timeout
+    typeof sessionTimeout === "number" && sessionTimeout > 0
+      ? sessionTimeout
       : DEFAULT_SESSION_TIMEOUT_S
-  return { id: user.id, timeout }
+  return { id, timeout }
 }
 
 export class BunqClient {
