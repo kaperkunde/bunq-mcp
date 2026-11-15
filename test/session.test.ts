@@ -71,6 +71,20 @@ describe("bootstrap", () => {
     expect(s.fake.count(...SESSION)).toBe(2)
   })
 
+  it("registers a new device when the permitted addresses change", async () => {
+    const s = setup()
+    await s.client.userId()
+    await s.restart({ permittedIps: ["192.0.2.1", "*"] }).userId()
+    expect(s.fake.count(...INSTALL)).toBe(1)
+    expect(s.fake.count(...DEVICE)).toBe(2)
+    const device = s.fake.requests.filter((r) => r.path === "/v1/device-server")
+    expect(JSON.parse(device[1]!.body!).permitted_ips).toEqual([
+      "192.0.2.1",
+      "*",
+    ])
+    expect(JSON.parse(device[0]!.body!)).not.toHaveProperty("permitted_ips")
+  })
+
   it("installs again when the environment changes", async () => {
     const s = setup()
     await s.client.userId()

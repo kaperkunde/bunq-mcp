@@ -20,8 +20,9 @@ import {
  *   /device-server with the API key, POST /session-server (signed) for a
  *   session token and the user's id. Each result is saved before the next
  *   step, so a restart picks up where it stopped.
- * - Later starts reuse the installation and device. A new API key (its hash
- *   differs from the one saved) registers a new device.
+ * - Later starts reuse the installation and device. A new API key or new
+ *   permitted addresses (their hash differs from the one saved) register a
+ *   new device.
  * - The session is made again before it runs out (its creation time plus
  *   the user's session_timeout), and at once when bunq answers 401 to a
  *   request that carried it; the request is then sent once more. Concurrent
@@ -286,6 +287,16 @@ export class BunqClient {
 
   // ---- The context ---------------------------------------------------------
 
+  /**
+   * What the device was registered with, hashed: the API key and the
+   * permitted addresses. A change to either registers a new device.
+   */
+  #registration(): string {
+    return sha256(
+      `${this.#config.apiKey}\n${this.#config.permittedIps.join(",")}`,
+    )
+  }
+
   #context(): ContextState {
     if (this.#state) return this.#state
     const { publicKeyPem } = this.#clientKeys()
@@ -359,7 +370,7 @@ export class BunqClient {
     }
     const next: ContextState = {
       ...state,
-      device: { id, apiKeySha256: sha256(this.#config.apiKey) },
+      device: { id, registration: this.#registration() },
       session: undefined,
     }
     this.#save(next)
@@ -403,10 +414,7 @@ export class BunqClient {
     let state = this.#context()
     const madeBefore = Boolean(state.installation && state.device)
     if (!state.installation) state = await this.#install(state)
-    if (
-      !state.device ||
-      state.device.apiKeySha256 !== sha256(this.#config.apiKey)
-    ) {
+    if (!state.device || state.device.registration !== this.#registration()) {
       state = await this.#registerDevice(state)
     }
     try {
@@ -433,7 +441,7 @@ export class BunqClient {
     const current = this.#context().session
     if (
       this.#fresh(current) &&
-      this.#context().device?.apiKeySha256 === sha256(this.#config.apiKey)
+      this.#context().device?.registration === this.#registration()
     ) {
       return current
     }

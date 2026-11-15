@@ -53,6 +53,7 @@ export type Setup = {
   restart(options?: {
     apiKey?: string
     environment?: "production" | "sandbox"
+    permittedIps?: string[]
   }): BunqClient
 }
 
@@ -70,13 +71,14 @@ export function setup(
   const make = (
     apiKey = API_KEY,
     environment: "production" | "sandbox" = "production",
+    permittedIps: string[] = [],
   ) =>
     new BunqClient({
       config: {
         apiKey,
         environment,
         draftMaxCents: options.draftMaxCents,
-        permittedIps: [],
+        permittedIps,
       },
       store: new Store(dir),
       transport: options.transport ? options.transport(fake) : fake.transport,
@@ -92,7 +94,11 @@ export function setup(
     lines,
     logger,
     restart(restartOptions = {}) {
-      result.client = make(restartOptions.apiKey, restartOptions.environment)
+      result.client = make(
+        restartOptions.apiKey,
+        restartOptions.environment,
+        restartOptions.permittedIps,
+      )
       return result.client
     },
   }

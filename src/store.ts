@@ -17,9 +17,9 @@ import type { Environment } from "./egress.ts"
  * - `client-key.pem`: the RSA key pair made on first start (2048 bits, as
  *   bunq takes it). Its public half is the installation's.
  * - `context.json`: the installation token and bunq's public key, the
- *   device's id and a hash of the API key it was registered with (so a new
- *   key registers a new device), and the current session: its token, the
- *   user's id, when it was made and how long bunq keeps it.
+ *   device's id and a hash of the API key and addresses it was registered
+ *   with (so a new key registers a new device), and the current session:
+ *   its token, the user's id, when it was made and how long bunq keeps it.
  *
  * Writes go to a temporary file and are renamed into place, so a crash
  * leaves the old file or the new one, never half of one.
@@ -38,7 +38,8 @@ export type ContextState = {
   /** SHA-256 of the client public key the installation was made with. */
   publicKeySha256: string
   installation?: { token: string; serverPublicKey: string }
-  device?: { id: number; apiKeySha256: string }
+  /** `registration`: SHA-256 of the API key and permitted addresses. */
+  device?: { id: number; registration: string }
   session?: SessionState
 }
 
